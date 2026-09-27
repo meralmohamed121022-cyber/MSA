@@ -539,7 +539,7 @@
 
 <style>
   body, html { margin:0; padding:0; background:#0f172a !important; color:#fff !important; font-family: Cairo, sans-serif !important; height: 100vh; overflow: hidden; }
-  body > *:not(#myCustomApp):not(#alternativesModal):not(script):not(style) {
+  body > *:not(#myCustomApp):not(#alternativesModal):not(#imageZoomModal):not(script):not(style) {
       display: none !important;
       opacity: 0 !important;
       visibility: hidden !important;
@@ -54060,6 +54060,11 @@ ${sdaiCircleHTML ? '' : badgeHTML} ${bestSellerBadge}
           // استخراج الأرقام فقط
           let digitsOnly = code.replace(/\D/g, "");
 
+          // 010 logic for QR codes that contain "010" + 13-digit GTIN + other chars
+          if (code.startsWith("010") && digitsOnly.length >= 16) {
+              return digitsOnly.substring(3, 16);
+          }
+
           // لو الكود كود عالمي أطول من 15 رقم
           if (digitsOnly.length >= 15) {
             // أخذ الـ 14 رقم التالية لبعد أول رقمين (من الخانة 2 إلى 16)
@@ -56041,6 +56046,14 @@ ${sdaiCircleHTML ? '' : badgeHTML} ${bestSellerBadge}
             code = code.substring(3);
           }
 
+          // استخراج الأرقام فقط
+          let digitsOnly = code.replace(/\D/g, "");
+
+          // 010 logic for QR codes that contain "010" + 13-digit GTIN + other chars
+          if (code.startsWith("010") && digitsOnly.length >= 16) {
+              return digitsOnly.substring(3, 16);
+          }
+
           // 3. تنظيف أي رموز متبقية قبل الأرقام
           code = code.replace(/^[^0-9]+/, "");
 
@@ -56484,6 +56497,10 @@ function compareAction(type, action) {
                 <table style="width:100%; border-collapse:collapse; color:#334155; font-size:13px; text-align:left;">
                     <thead style="background:#3b82f6; color:#fff; position:sticky; top:0;">
                         <tr>
+                            <th style="padding:10px; text-align:center; border-right:1px solid #2563eb; width: 60px;">
+                                Stock
+                                <button onclick="window.loadStockForAlts(this); event.stopPropagation();" style="display:block; margin-top:5px; padding:2px 5px; font-size:10px; background:#f59e0b; color:#fff; border:none; border-radius:3px; cursor:pointer; width:100%;">Load</button>
+                            </th>
                             <th style="padding:10px; text-align:center; border-right:1px solid #2563eb; width: 60px;">Image</th>
                             <th style="padding:10px; cursor:pointer; border-right:1px solid #2563eb;" onclick="window.sortAlts('name')">Description ▼</th>
                             <th style="padding:10px; cursor:pointer; border-right:1px solid #2563eb;" onclick="window.sortAlts('code')">ItemNum ▼</th>
@@ -56512,7 +56529,7 @@ function compareAction(type, action) {
 <script src="master2.js"></script>
 <script src="master3.js"></script>
 <script>
-let currentPharmacy = localStorage.getItem('pharmacyCode') || '';
+let currentPharmacy = localStorage.getItem('pharmacy_number') || localStorage.getItem('pharmacyCode') || '';
 let allItems = [];
 let myScanner = null;
 let cameraActive = false;
@@ -56636,9 +56653,24 @@ const runInit = () => {
         if (!src || src.includes('data:image/svg')) {
             return;
         }
-        const modal = document.getElementById('imageZoomModal');
-        const img = document.getElementById('imageZoomImg');
+        let modal = document.getElementById('imageZoomModal');
+        let img = document.getElementById('imageZoomImg');
+        
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'imageZoomModal';
+            modal.style.cssText = 'display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:2147483647; justify-content:center; align-items:center; cursor:zoom-out;';
+            modal.onclick = function() { this.style.display = 'none'; };
+            
+            img = document.createElement('img');
+            img.id = 'imageZoomImg';
+            img.style.cssText = 'max-width:90%; max-height:90%; object-fit:contain; border-radius:8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);';
+            modal.appendChild(img);
+            document.body.appendChild(modal);
+        }
+        
         if (modal && img) {
+            modal.style.zIndex = '2147483647';
             img.src = src;
             modal.style.display = 'flex';
         }
@@ -56664,6 +56696,52 @@ const runInit = () => {
             btn.innerHTML = 'Err';
             btn.disabled = false;
         }
+    };
+    window.loadStockForAlts = async function(btn) {
+        if(!currentPharmacy || !/^\d+$/.test(currentPharmacy)) {
+            alert("يرجى إدخال رقم صيدلية صحيح في البداية");
+            return;
+        }
+        const stockCells = document.querySelectorAll('#alternativesTableBody .stock-cell');
+        if(stockCells.length === 0) return;
+        
+        let codes = [];
+        stockCells.forEach(td => {
+            const c = td.getAttribute('data-code');
+            if(c) codes.push(c);
+            td.innerHTML = '<span style="font-size:10px; color:#64748b;">...</span>';
+        });
+        
+        btn.disabled = true;
+        btn.innerHTML = '...';
+
+        try {
+            const response = await fetch(`https://online.meralmohamed121022.workers.dev/api/stock?code=${encodeURIComponent(codes.join(','))}&store=${encodeURIComponent(currentPharmacy)}`, {
+                headers: { 'x-session-token': sessionStorage.getItem("_tk") || "" }
+            });
+            const result = await response.json();
+            
+            let stockMap = {};
+            if (result.success && result.results) {
+                result.results.forEach(item => {
+                    const itemCode = item.code;
+                    stockMap[String(itemCode)] = Number(item.stockLevel) || 0;
+                });
+            }
+            
+            stockCells.forEach(td => {
+                const c = String(td.getAttribute('data-code'));
+                const qty = stockMap.hasOwnProperty(c) ? stockMap[c] : 0;
+                td.innerHTML = qty > 0 ? `<span style="color:#10b981;font-weight:900;">${qty}</span>` : `<span style="color:#ef4444;font-weight:900;">0</span>`;
+            });
+        } catch(err) {
+            console.error("Stock check error:", err);
+            stockCells.forEach(td => {
+                td.innerHTML = `<span style="color:#ef4444; font-size:12px;">Err</span>`;
+            });
+        }
+        btn.disabled = false;
+        btn.innerHTML = 'Load';
     };
 
     
@@ -56779,6 +56857,7 @@ const runInit = () => {
             const tr = document.createElement('tr');
             tr.style.background = bg;
             tr.innerHTML = `
+                <td class="stock-cell" data-code="${alt.Code}" style="padding:10px; text-align:center; font-weight:bold; color:#64748b; font-size:16px;">...</td>
                 <td style="padding:10px; text-align:center;">
                     <div style="position:relative; display:inline-block;">
                         <img src="${imgSrc}" 
@@ -56801,6 +56880,80 @@ const runInit = () => {
             `;
             tbody.appendChild(tr);
         });
+
+        // Fetch stock for all loaded alternatives
+        if (window.currentAltsData.length > 0 && currentPharmacy && /^\\d+$/.test(currentPharmacy)) {
+            const allCodes = window.currentAltsData.map(a => String(a.Code).trim());
+            const chunks = [];
+            for (let i = 0; i < allCodes.length; i += 40) {
+                chunks.push(allCodes.slice(i, i + 40));
+            }
+            
+            chunks.forEach(chunk => {
+                const cfUrl = `https://online.meralmohamed121022.workers.dev/api/stock?code=${chunk.join(',')}&store=${currentPharmacy}`;
+                fetch(cfUrl, { headers: { 'x-session-token': sessionStorage.getItem("_tk") || "" } })
+                .then(res => res.json())
+                .then(data => {
+                    const updateCell = (code, qty, isStock) => {
+                        const cell = Array.from(tbody.querySelectorAll('.stock-cell')).find(c => String(c.dataset.code).trim() === String(code).trim());
+                        if(cell) {
+                            if(isStock && qty > 0) {
+                                cell.innerHTML = `<span style="color:#10b981;font-weight:900;">${qty}</span>`;
+                            } else {
+                                cell.innerHTML = `<span style="color:#ef4444;font-weight:900;">0</span>`;
+                            }
+                        }
+                    };
+
+                    if (data && data.success && data.results) {
+                        data.results.forEach(item => {
+                            const c = String(item.code).trim();
+                            const qty = Number(item.stockLevel) || 0;
+                            const isStock = qty > 0;
+                            updateCell(c, qty, isStock);
+                        });
+                        
+                        // Remaining chunks
+                        const receivedCodes = new Set(data.results.map(i => String(i.code).trim()));
+                        chunk.forEach(c => {
+                            if (!receivedCodes.has(c)) updateCell(c, 0, false);
+                        });
+                    } else if (Array.isArray(data)) {
+                        data.forEach(item => {
+                            const c = String(item.productCode).trim();
+                            const isStock = item.stock && item.stock.stockLevelStatus === 'inStock';
+                            const qty = item.stock ? item.stock.stockLevel : 0;
+                            updateCell(c, qty, isStock);
+                        });
+                        
+                        // Remaining chunks
+                        const receivedCodes = new Set(data.map(i => String(i.productCode).trim()));
+                        chunk.forEach(c => {
+                            if (!receivedCodes.has(c)) updateCell(c, 0, false);
+                        });
+                    } else if (data && data.stock) {
+                        const c = String(chunk[0]).trim();
+                        const isStock = data.stock.stockLevelStatus === 'inStock';
+                        const qty = data.stock.stockLevel;
+                        updateCell(c, qty, isStock);
+                    } else {
+                        chunk.forEach(c => updateCell(c, 0, false));
+                    }
+                })
+                .catch(err => {
+                    console.error('Stock fetch error', err);
+                    chunk.forEach(c => {
+                        const cell = Array.from(tbody.querySelectorAll('.stock-cell')).find(td => String(td.dataset.code).trim() === String(c).trim());
+                        if(cell) cell.innerHTML = `<span style="color:#64748b;">-</span>`;
+                    });
+                });
+            });
+        } else {
+            const cells = tbody.querySelectorAll('.stock-cell');
+            cells.forEach(cell => {
+                cell.innerHTML = `<span style="color:#64748b;">-</span>`;
+            });
+        }
     };
 
 
