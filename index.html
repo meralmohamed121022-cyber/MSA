@@ -56671,6 +56671,11 @@ const runInit = () => {
         const tbody = document.getElementById('alternativesTableBody');
         tbody.innerHTML = '';
         
+        const baseProduct = allItems.find(i => String(i.Code) === String(window.currentAltCode));
+        const baseName = baseProduct ? (baseProduct['Item Description'] || baseProduct['أسم المنتج'] || '').toUpperCase() : '';
+        const mgMatch = baseName.match(/(\d+(?:\.\d+)?)\s*(MG|ML|G|MCG|IU)/);
+        const baseDose = mgMatch ? mgMatch[0].replace(/\s+/g, '') : null;
+        
         // PRECALCULATE OFFERS
         window.currentAltsData.forEach(alt => {
             let offerTxt = '';
@@ -56696,6 +56701,12 @@ const runInit = () => {
                 if(offer) offerTxt = offer.offerTypeEN || offer.offerType || offer.offerTypeAR || offer.type || '';
             }
             alt._offerTxt = offerTxt;
+            
+            alt._hasSameDose = 0;
+            if (baseDose) {
+                 const altName = (alt['Item Description'] || alt['أسم المنتج'] || '').toUpperCase().replace(/\s+/g, '');
+                 if (altName.includes(baseDose)) alt._hasSameDose = 1;
+            }
         });
 
         const otcRank = { 'dia': 1, 'diamond': 1, 'gld': 2, 'gold': 2, 'slv': 3, 'silver': 3, 'mc': 4 };
@@ -56715,6 +56726,9 @@ const runInit = () => {
 
                 if (isAFirst && !isBFirst) return -1;
                 if (isBFirst && !isAFirst) return 1;
+                
+                if (a._hasSameDose > b._hasSameDose) return -1;
+                if (b._hasSameDose > a._hasSameDose) return 1;
                 
                 if (aHasOffer > bHasOffer) return -1;
                 if (bHasOffer > aHasOffer) return 1;
@@ -56770,6 +56784,7 @@ const runInit = () => {
                         <img src="${imgSrc}" 
                              onerror="this.onerror=null; this.src='${placeholderSrc}'; if(this.nextElementSibling) this.nextElementSibling.style.display='block';" 
                              onclick="window.showImageModal(this.src); event.stopPropagation();" 
+                             referrerpolicy="no-referrer"
                              style="width:50px; height:50px; object-fit:contain; cursor:zoom-in; border-radius:4px; border:1px solid #e2e8f0; background:#fff;" 
                              alt="${name.replace(/"/g, '')}" />
                         <button onclick="window.fetchWorkerImage(this, '${alt.Code}'); event.stopPropagation();" 
@@ -56819,7 +56834,15 @@ nameSearchInput.addEventListener('input', (e) => {
         const nar = (i['أسم المنتج']||'').toLowerCase();
         const nen = (i['Item Description']||'').toLowerCase();
         const code = String(i.Code).toLowerCase();
-        return nar.includes(val) || nen.includes(val) || code.includes(val);
+        
+        let gtinMatch = false;
+        const gtinData = i.GTIN || i.gtin || i.Gtin;
+        if (gtinData) {
+            const gArray = Array.isArray(gtinData) ? gtinData : [gtinData];
+            gtinMatch = gArray.some(g => String(g).toLowerCase().includes(val));
+        }
+        
+        return nar.includes(val) || nen.includes(val) || code.includes(val) || gtinMatch;
     }).slice(0, 15);
     
     nameSuggestions.innerHTML = '';
@@ -56827,11 +56850,23 @@ nameSearchInput.addEventListener('input', (e) => {
         results.forEach(item => {
             const div = document.createElement('div');
             div.className = 'suggestion-item';
-            div.innerHTML = `<img src="${item.itemurl !== 'No Image' ? item.itemurl : 'https://via.placeholder.com/40'}" />
+            const nameStr = item['Item Description'] || item['أسم المنتج'] || 'P';
+            const firstLetter = nameStr.trim().charAt(0).toUpperCase();
+            const svg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="#e2e8f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="20" font-weight="bold" fill="#64748b">${firstLetter}</text></svg>`);
+            const placeholderSrc = `data:image/svg+xml;utf8,${svg}`;
+            
+            const rawUrl = item.image_url || item.itemurl || item.ItemURL || item.Image || item.image || item.imageurl || item.imageUrl || item.ImageURL || item.itemURL;
+            const validImage = (rawUrl && typeof rawUrl === 'string' && rawUrl.trim() !== '' && rawUrl !== 'No Image' && rawUrl !== 'null' && rawUrl !== 'undefined');
+            const imgSrc = validImage ? rawUrl : placeholderSrc;
+            
+            const uniqueImgId = `sugg-img-${item.Code}-${Date.now()}-${Math.floor(Math.random()*1000)}`;
+            
+            div.innerHTML = `<img id="${uniqueImgId}" src="${imgSrc}" onerror="this.onerror=null; this.src='${placeholderSrc}';" referrerpolicy="no-referrer" style="width:40px; height:40px; object-fit:contain; background:#fff; border-radius:4px; margin-right:10px;" />
                              <div style="flex: 1; padding: 0 10px;">
                                 <div style="font-size:14px; font-weight:bold;">${item['Item Description']||item['أسم المنتج']}</div>
                                 <div style="font-size:12px; color:#94a3b8;">SAR ${item['Unit Price']} - ${item.Code}</div>
                              </div>`;
+                             
             div.onclick = () => {
                 nameSearchInput.value = '';
                 nameSuggestions.style.display = 'none';
