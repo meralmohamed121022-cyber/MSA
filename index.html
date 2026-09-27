@@ -56824,26 +56824,35 @@ function savePharmacy() {
 const nameSearchInput = document.getElementById('nameSearchInput');
 const nameSuggestions = document.getElementById('nameSuggestions');
 
-nameSearchInput.addEventListener('input', (e) => {
-    const val = e.target.value.trim().toLowerCase();
-    if(val.length < 3) {
-        nameSuggestions.style.display = 'none';
-        return;
-    }
-    const results = allItems.filter(i => {
-        const nar = (i['أسم المنتج']||'').toLowerCase();
-        const nen = (i['Item Description']||'').toLowerCase();
-        const code = String(i.Code).toLowerCase();
-        
-        let gtinMatch = false;
-        const gtinData = i.GTIN || i.gtin || i.Gtin;
-        if (gtinData) {
-            const gArray = Array.isArray(gtinData) ? gtinData : [gtinData];
-            gtinMatch = gArray.some(g => String(g).toLowerCase().includes(val));
+    nameSearchInput.addEventListener('input', (e) => {
+        const rawVal = e.target.value.trim();
+        const val = rawVal.toLowerCase();
+        if(val.length < 3) {
+            nameSuggestions.style.display = 'none';
+            return;
         }
         
-        return nar.includes(val) || nen.includes(val) || code.includes(val) || gtinMatch;
-    }).slice(0, 15);
+        // استخدام نفس منطق الاسكانر
+        const parsedGtin = (typeof parseBarcode === 'function') ? parseBarcode(rawVal) : val;
+
+        const results = allItems.filter(i => {
+            const nar = (i['أسم المنتج']||'').toLowerCase();
+            const nen = (i['Item Description']||'').toLowerCase();
+            const code = String(i.Code).toLowerCase();
+            
+            let gtinMatch = false;
+            const gtinData = i.GTIN || i.gtin || i.Gtin;
+            if (gtinData) {
+                const gArray = Array.isArray(gtinData) ? gtinData : [gtinData];
+                // نبحث إما بالقيمة العادية المدخلة أو بالقيمة بعد معالجتها كباركود
+                gtinMatch = gArray.some(g => {
+                    const gStr = String(g).toLowerCase();
+                    return gStr.includes(val) || (parsedGtin && gStr.includes(parsedGtin));
+                });
+            }
+            
+            return nar.includes(val) || nen.includes(val) || code.includes(val) || gtinMatch;
+        }).slice(0, 15);
     
     nameSuggestions.innerHTML = '';
     if(results.length > 0) {
